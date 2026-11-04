@@ -23,15 +23,6 @@
         <span class="location-chip"><span class="status-dot"></span> Repartos · Durazno, UY</span>
       </header>
 
-      <!-- <section class="intro" id="inicio" aria-labelledby="page-title">
-        <div>
-          <p class="eyebrow">PANEL DE REPARTOS</p>
-          <h1 id="page-title">Un pedido más,<br /><span>todo bajo control.</span></h1>
-          <p class="intro-copy">Cargá los datos, confirmá la ubicación y compartí el pedido por WhatsApp.</p>
-        </div>
-        <div class="intro-icon" aria-hidden="true">✳</div>
-      </section> -->
-
       <section class="order-layout" aria-label="Carga de pedido y ubicación">
         <article class="card form-card">
           <div class="card-heading">
@@ -43,7 +34,7 @@
           </div>
 
           <form id="order-form" novalidate>
-            <div class="field">
+            <div class="field merchant-field">
               <label for="merchant">Nombre del comercio <span class="required-mark">*</span></label>
               <input id="merchant" name="merchant" type="text" autocomplete="organization" maxlength="70" placeholder="Ej. La Esquina Café" required />
               <small>Se guarda para tus próximos pedidos.</small>
@@ -61,7 +52,7 @@
               </div>
             </div>
 
-            <div class="field">
+            <div class="field address-field">
               <label for="address">Dirección de entrega <span class="required-mark">*</span></label>
               <div class="address-row">
                 <div class="address-search">
