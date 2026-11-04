@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="es-UY">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Gestión rápida de pedidos de reparto en Durazno, Uruguay." />
+    <title>Mesa Lista — Pedidos de reparto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#inicio" aria-label="Mesa Lista, inicio">
+          <span class="brand-mark" aria-hidden="true">AJ</span>
+          <span>Repartos <strong>AJ</strong></span>
+        </a>
+        <span class="location-chip"><span class="status-dot"></span> Repartos · Durazno, UY</span>
+      </header>
+
+      <section class="intro" id="inicio" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">PANEL DE REPARTOS</p>
+          <h1 id="page-title">Un pedido más,<br /><span>todo bajo control.</span></h1>
+          <p class="intro-copy">Cargá los datos, confirmá la ubicación y compartí el pedido por WhatsApp.</p>
+        </div>
+        <div class="intro-icon" aria-hidden="true">✳</div>
+      </section>
+
+      <section class="order-layout" aria-label="Carga de pedido y ubicación">
+        <article class="card form-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">NUEVO REGISTRO</p>
+              <h2>Cargar pedido</h2>
+            </div>
+            <span class="step-badge">01</span>
+          </div>
+
+          <form id="order-form" novalidate>
+            <div class="field">
+              <label for="merchant">Nombre del comercio <span class="required-mark">*</span></label>
+              <input id="merchant" name="merchant" type="text" autocomplete="organization" maxlength="70" placeholder="Ej. La Esquina Café" required />
+              <small>Se guarda para tus próximos pedidos.</small>
+            </div>
+
+            <div class="field-grid">
+              <div class="field">
+                <label for="customer">Nombre del cliente <span class="required-mark">*</span></label>
+                <input id="customer" name="customer" type="text" autocomplete="name" maxlength="70" placeholder="Nombre y apellido" required />
+              </div>
+              <div class="field">
+                <label for="contact">Contacto <span class="required-mark">*</span></label>
+                <input id="contact" name="contact" type="tel" inputmode="numeric" autocomplete="tel" maxlength="9" pattern="[0-9]{9}" placeholder="9 dígitos" title="Ingresá exactamente 9 dígitos, sin espacios ni guiones." required />
+                <small>Ingresá 9 dígitos, sin espacios.</small>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="address">Dirección de entrega <span class="required-mark">*</span></label>
+              <div class="address-row">
+                <div class="address-search">
+                  <input id="address" name="address" type="text" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="address-suggestions" aria-expanded="false" maxlength="120" placeholder="Escribí una calle o dirección…" required />
+                  <div class="address-suggestions" id="address-suggestions" role="listbox" aria-label="Coincidencias de direcciones" hidden></div>
+                </div>
+                <button class="button button-secondary locate-button" id="locate-button" type="button">
+                  <span aria-hidden="true">⌖</span> Ubicar
+                </button>
+              </div>
+              <small id="location-status" aria-live="polite">Escribí para ver coincidencias de Durazno, Uruguay.</small>
+            </div>
+
+            <div class="field shared-location-field">
+              <label for="shared-location">Ubicación compartida</label>
+              <input id="shared-location" name="sharedLocation" type="text" inputmode="url" autocomplete="off" placeholder="Pegá un enlace de Google Maps o Apple Maps" aria-describedby="shared-location-hint shared-location-status" />
+              <small id="shared-location-hint">¿Tienes la ubicación de tu cliente? Pégala aquí</small>
+              <small id="shared-location-status" aria-live="polite"></small>
+            </div>
+
+            <div class="field-grid amount-payment-grid">
+              <div class="field">
+                <label for="amount">Monto del pedido <span class="required-mark">*</span></label>
+                <div class="input-prefix"><span>$</span><input id="amount" name="amount" type="text" inputmode="decimal" autocomplete="off" pattern="(?:[0-9]+|[0-9]{1,3}(?:\.[0-9]{3})+)(?:,[0-9]{1,2})?" placeholder="0,00" title="Usá números y coma decimal; por ejemplo 1250,50." required /></div>
+                <small>UYU · Ejemplo: 1250,50</small>
+              </div>
+              <div class="field">
+                <label for="payment-method">Método de pago <span class="required-mark">*</span></label>
+                <select id="payment-method" name="paymentMethod" required>
+                  <option value="EFECTIVO" selected>EFECTIVO</option>
+                  <option value="POS">POS</option>
+                  <option value="TRANSFERENCIA">TRANSFERENCIA</option>
+                </select>
+                <small>Seleccioná cómo se abonará el pedido.</small>
+              </div>
+            </div>
+
+            <div class="field notes-field">
+              <label for="notes">Observaciones</label>
+              <textarea id="notes" name="notes" rows="2" maxlength="180" placeholder="Casa blanca, llamar al llegar…"></textarea>
+              <small><span id="word-count">0</span>/20 palabras</small>
+            </div>
+
+            <div class="form-footer">
+              <p><span aria-hidden="true">↗</span> WhatsApp abrirá el pedido listo; confirmá con Enviar.</p>
+              <button class="button button-primary submit-button" type="submit">Cargar pedido <span aria-hidden="true">→</span></button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card map-card">
+          <div class="card-heading map-heading">
+            <div>
+              <p class="eyebrow">PUNTO DE ENTREGA</p>
+              <h2>Ubicación</h2>
+            </div>
+            <span class="map-pin-icon" aria-hidden="true">⌖</span>
+          </div>
+          <div class="map-frame-wrap">
+            <iframe
+              id="map-frame"
+              title="Mapa de OpenStreetMap de Durazno, Uruguay. Se actualizará con la dirección seleccionada."
+              src="https://www.openstreetmap.org/export/embed.html?bbox=-56.56%2C-33.42%2C-56.49%2C-33.34&amp;layer=mapnik&amp;marker=-33.3782%2C-56.5241"
+              allowfullscreen
+            ></iframe>
+            <div class="map-overlay-label"><span class="status-dot"></span><span id="map-label">Durazno, Uruguay</span></div>
+          </div>
+          <div class="map-caption">
+            <span class="caption-icon" aria-hidden="true">◎</span>
+            <p>Escribí una calle para ver coincidencias y seleccioná la dirección. El pin se actualizará en el mapa.</p>
+          </div>
+          <p class="map-attribution">Mapa y nombres de calles: © colaboradores de OpenStreetMap</p>
+        </article>
+      </section>
+
+      <section class="card orders-card" aria-labelledby="orders-title">
+        <div class="orders-heading">
+          <div>
+            <p class="eyebrow">RESUMEN DIARIO</p>
+            <h2 id="orders-title">Pedidos cargados</h2>
+          </div>
+          <span class="today-label" id="today-label"></span>
+        </div>
+
+        <div class="metrics-row">
+          <div class="metric-card merchant-metric">
+            <span class="metric-icon merchant-icon" aria-hidden="true">♨</span>
+            <div><span class="metric-label">COMERCIO</span><strong id="merchant-indicator">Aún sin comercio</strong></div>
+          </div>
+          <div class="metric-card count-metric">
+            <span class="metric-icon count-icon" aria-hidden="true">#</span>
+            <div><span class="metric-label">PEDIDOS DE HOY</span><strong id="today-count">0</strong></div>
+          </div>
+          <button class="button button-export" id="export-button" type="button"><span aria-hidden="true">↓</span> Exportar PDF</button>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Hora</th>
+                <th scope="col">Cliente</th>
+                <th scope="col">Dirección</th>
+                <th scope="col">Contacto</th>
+                <th scope="col">Método de pago</th>
+                <th scope="col">Ubicación</th>
+                <th scope="col">Monto</th>
+                <th scope="col">Observaciones</th>
+              </tr>
+            </thead>
+            <tbody id="orders-body"></tbody>
+          </table>
+          <div class="empty-state" id="empty-state">
+            <span class="empty-illustration" aria-hidden="true">☕</span>
+            <strong>Tu lista está lista para empezar</strong>
+            <p>Los pedidos que cargues aparecerán acá.</p>
+          </div>
+        </div>
+        <div class="table-footer"><span><span class="status-dot"></span> Guardado automáticamente en este dispositivo</span><span id="total-orders"></span></div>
+      </section>
+
+      <footer class="page-footer"><span>Repartos AJ</span><span>Hecho para que cada pedido llegue a buen puerto.</span></footer>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+  </body>
+</html>
