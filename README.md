@@ -1,4 +1,4 @@
-# Mesa Lista
+# Repartos AJ
 
 Aplicación web estática para registrar pedidos de reparto y compartirlos por WhatsApp.
 
