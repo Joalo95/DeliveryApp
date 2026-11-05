@@ -8,15 +8,18 @@ const merchantInput = document.querySelector('#merchant');
 const customerInput = document.querySelector('#customer');
 const contactInput = document.querySelector('#contact');
 const addressInput = document.querySelector('#address');
+const cornerInput = document.querySelector('#corner');
 const sharedLocationInput = document.querySelector('#shared-location');
 const sharedLocationStatus = document.querySelector('#shared-location-status');
 const addressSuggestions = document.querySelector('#address-suggestions');
+const cornerSuggestions = document.querySelector('#corner-suggestions');
 const addressSearch = document.querySelector('.address-search');
 const amountInput = document.querySelector('#amount');
 const notesInput = document.querySelector('#notes');
-const locateButton = document.querySelector('#locate-button');
 const locationStatus = document.querySelector('#location-status');
+const cornerStatus = document.querySelector('#corner-status');
 const mapFrame = document.querySelector('#map-frame');
+const mapTiles = document.querySelector('#map-tiles');
 const mapLabel = document.querySelector('#map-label');
 const ordersBody = document.querySelector('#orders-body');
 const emptyState = document.querySelector('#empty-state');
@@ -44,10 +47,16 @@ let addressSearchTimer;
 let addressSearchController = null;
 let addressMatches = [];
 let highlightedSuggestion = -1;
+let cornerSearchTimer;
+let cornerSearchController = null;
+let cornerMatches = [];
+let highlightedCornerSuggestion = -1;
+let automaticLocateTimer;
 let sharedLocationTimer;
 let sharedLocationController = null;
 let lastProcessedSharedLink = '';
 const osmWayCache = new Map();
+const photonQueryCache = new Map();
 
 function readStoredOrders() {
   try {
@@ -320,9 +329,10 @@ async function resolveSharedMapLink(link) {
     };
     addressInput.value = address;
     resolvedLocation = location;
+    setCornerRequired(false, 'Opcional si se encuentra la dirección con número.');
     addressSearchController?.abort();
     hideAddressSuggestions();
-    mapFrame.src = makeOpenStreetMapEmbedUrl(location.latitude, location.longitude);
+    updateMap(location.latitude, location.longitude);
     mapLabel.textContent = location.displayName;
     locationStatus.textContent = `Ubicación confirmada en Durazno · ${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`;
     locationStatus.classList.remove('location-error');
@@ -352,36 +362,87 @@ function formatPhotonPlace(feature) {
   };
 }
 
-function parseIntersectionQuery(query) {
-  const cleanedQuery = query
-    .replace(/^\s*(?:esquina|intersecci[oó]n(?:\s+de)?|cruce\s+de)\s+/i, '')
+function normalizeAddressSearchText(value) {
+  return value.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
     .trim();
-  const streets = cleanedQuery.split(/\s+(?:esquina|esq\.?|y)\s+|\s*&\s*|\s*\/\s*/i)
-    .map((street) => street.trim().replace(/^(?:calle|c\.|avenida|av\.|bulevar|blvd\.)\s+/i, ''));
-  return streets.length === 2 && streets.every((street) => street.length >= 2)
-    ? streets
-    : null;
 }
 
-async function fetchStreetWays(streetName) {
+function normalizeStreetName(value) {
+  return normalizeAddressSearchText(value)
+    .replace(/^(?:calle|c\.|avenida|av\.?|bulevar|blvd\.?)\s+/i, '');
+}
+
+function parseHouseNumberQuery(query) {
+  const trimmedQuery = query.trim();
+  const match = trimmedQuery.match(/\s+(\d+(?:\s*[a-z]+)?(?:[-/]\d+[a-z]?)?)\s*$/i);
+  if (!match) return null;
+  return {
+    street: trimmedQuery.slice(0, match.index).trim(),
+    houseNumber: normalizeAddressSearchText(match[1]).replace(/\s+/g, ''),
+    query: trimmedQuery,
+  };
+}
+
+function fetchPhotonFeatures(params) {
+  const query = params.toString();
+  if (photonQueryCache.has(query)) return photonQueryCache.get(query);
+
+  const requestUrl = window.location.protocol === 'file:'
+    ? `https://photon.komoot.io/api/?${query}`
+    : `/api/photon?${query}`;
+  const request = fetch(requestUrl)
+    .then(async (response) => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'No se pudo consultar el buscador de direcciones.');
+      return result;
+    })
+    .then((result) => result.features || [])
+    .catch((error) => {
+      photonQueryCache.delete(query);
+      throw error;
+    });
+  photonQueryCache.set(query, request);
+  if (photonQueryCache.size > 100) {
+    photonQueryCache.delete(photonQueryCache.keys().next().value);
+  }
+  return request;
+}
+
+async function fetchStreetWays(streetName, { signal, exactOnly = false } = {}) {
   const params = new URLSearchParams({
     q: `${streetName}, Durazno, Uruguay`,
     lat: '-33.3782',
     lon: '-56.5241',
     limit: '12',
   });
-  const response = await fetch(`https://photon.komoot.io/api/?${params}`);
-  if (!response.ok) throw new Error('No se pudieron consultar las calles de Durazno.');
-  const result = await response.json();
-  const normalizedName = streetName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const seenWays = new Set();
-  return (result.features || []).filter((feature) => {
+  const features = await fetchPhotonFeatures(params);
+  if (signal?.aborted) return [];
+  const normalizedName = normalizeStreetName(streetName);
+  const streets = features.filter((feature) => {
     const place = feature.properties || {};
-    const name = (place.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    if (place.osm_type !== 'W' || place.type !== 'street' || !isDuraznoCity(place)) return false;
-    if (!name.includes(normalizedName) && !normalizedName.includes(name)) return false;
-    if (seenWays.has(place.osm_id)) return false;
-    seenWays.add(place.osm_id);
+    return place.osm_type === 'W'
+      && place.type === 'street'
+      && isDuraznoCity(place);
+  });
+  const exactStreets = streets.filter((feature) => (
+    normalizeStreetName(feature.properties.name || '') === normalizedName
+  ));
+  if (exactOnly) return exactStreets.slice(0, 5);
+
+  const matchingStreets = exactStreets.length
+    ? exactStreets
+    : streets.filter((feature) => {
+      const name = normalizeStreetName(feature.properties.name || '');
+      return name.includes(normalizedName) || normalizedName.includes(name);
+    });
+  const seenWays = new Set();
+  return matchingStreets.filter((feature) => {
+    const wayId = feature.properties.osm_id;
+    if (seenWays.has(wayId)) return false;
+    seenWays.add(wayId);
     return true;
   }).slice(0, 5);
 }
@@ -411,7 +472,9 @@ function fetchOsmWayNodes(wayId) {
 }
 
 async function findStreetIntersections(streetNames) {
-  const [firstWays, secondWays] = await Promise.all(streetNames.map(fetchStreetWays));
+  const [firstWays, secondWays] = await Promise.all(streetNames.map((street) => (
+    fetchStreetWays(street, { exactOnly: true })
+  )));
   const wayPairs = await Promise.all(firstWays.flatMap((firstFeature) => secondWays.map(async (secondFeature) => {
     const [firstData, secondData] = await Promise.all([
       fetchOsmWayNodes(firstFeature.properties.osm_id),
@@ -438,42 +501,41 @@ async function findStreetIntersections(streetNames) {
     return true;
   });
 
-  const validatedIntersections = await Promise.all(intersections.slice(0, 8).map(async (intersection) => {
-    const params = new URLSearchParams({
-      lat: String(intersection.latitude),
-      lon: String(intersection.longitude),
-      lang: 'en',
-    });
-    const response = await fetch(`https://photon.komoot.io/reverse?${params}`);
-    if (!response.ok) return null;
-    const result = await response.json();
-    return result.features?.some((feature) => isDuraznoCity(feature.properties || {}))
-      ? intersection
-      : null;
-  }));
-  return validatedIntersections.filter(Boolean);
+  return intersections;
 }
 
-function openOpenStreetMapSearch(query) {
-  const search = `${query}, Durazno, Uruguay`;
-  return `https://www.openstreetmap.org/search?query=${encodeURIComponent(search)}`;
-}
+function updateMap(latitude, longitude, zoom = 16) {
+  const tileCount = 2 ** zoom;
+  const latitudeRadians = Math.max(-85.05112878, Math.min(85.05112878, latitude)) * Math.PI / 180;
+  const tileX = ((longitude + 180) / 360) * tileCount;
+  const tileY = ((1 - Math.asinh(Math.tan(latitudeRadians)) / Math.PI) / 2) * tileCount;
+  const centerTileX = Math.floor(tileX);
+  const centerTileY = Math.floor(tileY);
+  const offsetX = (tileX - centerTileX) * 256;
+  const offsetY = (tileY - centerTileY) * 256;
+  const tileLayer = document.createElement('div');
+  tileLayer.className = 'map-tile-layer';
+  tileLayer.style.left = `calc(50% - ${256 + offsetX}px)`;
+  tileLayer.style.top = `calc(50% - ${256 + offsetY}px)`;
 
-function makeOpenStreetMapEmbedUrl(latitude, longitude, zoom = 16) {
-  const longitudeOffset = zoom >= 16 ? 0.006 : 0.035;
-  const latitudeOffset = zoom >= 16 ? 0.004 : 0.025;
-  const bounds = [
-    longitude - longitudeOffset,
-    latitude - latitudeOffset,
-    longitude + longitudeOffset,
-    latitude + latitudeOffset,
-  ].map((coordinate) => coordinate.toFixed(6));
-  const params = new URLSearchParams({
-    bbox: bounds.join(','),
-    layer: 'mapnik',
-    marker: `${latitude},${longitude}`,
-  });
-  return `https://www.openstreetmap.org/export/embed.html?${params}`;
+  for (let row = -1; row <= 1; row += 1) {
+    for (let column = -1; column <= 1; column += 1) {
+      const y = centerTileY + row;
+      if (y < 0 || y >= tileCount) continue;
+      const x = (centerTileX + column + tileCount) % tileCount;
+      const tile = document.createElement('img');
+      tile.alt = '';
+      tile.width = 256;
+      tile.height = 256;
+      tile.loading = 'eager';
+      tile.referrerPolicy = 'no-referrer';
+      tile.src = `https://tile.openstreetmap.de/${zoom}/${x}/${y}.png`;
+      tileLayer.append(tile);
+    }
+  }
+
+  mapTiles.replaceChildren(tileLayer);
+  mapFrame.setAttribute('aria-label', `Mapa con ubicación en ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
 }
 
 function hideAddressSuggestions() {
@@ -483,7 +545,29 @@ function hideAddressSuggestions() {
   highlightedSuggestion = -1;
 }
 
-function renderAddressSuggestions(features, query, message = '') {
+function hideCornerSuggestions() {
+  cornerSuggestions.hidden = true;
+  cornerInput.setAttribute('aria-expanded', 'false');
+  cornerInput.removeAttribute('aria-activedescendant');
+  highlightedCornerSuggestion = -1;
+}
+
+function setCornerRequired(required, message) {
+  cornerInput.required = required;
+  cornerStatus.textContent = message;
+  if (!required) cornerInput.setCustomValidity('');
+}
+
+function scheduleAutomaticLocate(delay = 250) {
+  window.clearTimeout(automaticLocateTimer);
+  automaticLocateTimer = window.setTimeout(() => {
+    if (!addressInput.value.trim()) return;
+    if (!parseHouseNumberQuery(addressInput.value) && !cornerInput.value.trim()) return;
+    locateAddress();
+  }, delay);
+}
+
+function renderAddressSuggestions(features, message = '') {
   addressSuggestions.replaceChildren();
   addressMatches = features;
   highlightedSuggestion = -1;
@@ -492,18 +576,10 @@ function renderAddressSuggestions(features, query, message = '') {
     const empty = document.createElement('div');
     empty.className = 'suggestion-empty';
     empty.append(document.createTextNode(message || 'No encontramos coincidencias en Durazno. '));
-    const googleLink = document.createElement('a');
-    googleLink.href = openOpenStreetMapSearch(query);
-    googleLink.target = '_blank';
-    googleLink.rel = 'noopener noreferrer';
-    googleLink.textContent = 'Buscar en OpenStreetMap';
-    empty.append(googleLink);
     addressSuggestions.append(empty);
-    locationStatus.textContent = 'No hay coincidencias en el callejero de Durazno. Podés comprobar el nombre en OpenStreetMap.';
-    locationStatus.classList.add('location-error');
   } else {
     features.forEach((feature, index) => {
-      const place = feature.type === 'intersection' ? feature : formatPhotonPlace(feature);
+      const place = formatPhotonPlace(feature);
       const option = document.createElement('button');
       option.className = 'suggestion-option';
       option.type = 'button';
@@ -521,7 +597,9 @@ function renderAddressSuggestions(features, query, message = '') {
       option.addEventListener('click', () => selectAddressSuggestion(index));
       addressSuggestions.append(option);
     });
-    locationStatus.textContent = 'Seleccioná una coincidencia para confirmar el pin en el mapa.';
+    locationStatus.textContent = features[0]?.properties?.type === 'street'
+      ? 'Elegí una calle sugerida; para ubicarla necesitás indicar la otra calle.'
+      : 'Seleccioná una coincidencia para confirmar el pin en el mapa.';
     locationStatus.classList.remove('location-error');
   }
 
@@ -529,24 +607,146 @@ function renderAddressSuggestions(features, query, message = '') {
   addressInput.setAttribute('aria-expanded', 'true');
 }
 
+function renderCornerSuggestions(features, message = '') {
+  cornerSuggestions.replaceChildren();
+  cornerMatches = features;
+  highlightedCornerSuggestion = -1;
+
+  if (!features.length) {
+    const empty = document.createElement('div');
+    empty.className = 'suggestion-empty';
+    empty.textContent = message || 'No encontramos calles con ese nombre en Durazno.';
+    cornerSuggestions.append(empty);
+  } else {
+    features.forEach((feature, index) => {
+      const option = document.createElement('button');
+      option.className = 'suggestion-option';
+      option.type = 'button';
+      option.id = `corner-suggestion-${index}`;
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', 'false');
+
+      const title = document.createElement('span');
+      title.className = 'suggestion-title';
+      title.textContent = feature.properties.name;
+      const detail = document.createElement('span');
+      detail.className = 'suggestion-detail';
+      detail.textContent = 'Calle de Durazno, Uruguay';
+      option.append(title, detail);
+      option.addEventListener('click', () => {
+        cornerInput.value = feature.properties.name;
+        if (resolvedLocation?.type === 'intersection') resolvedLocation = null;
+        hideCornerSuggestions();
+        cornerStatus.textContent = 'Calle seleccionada. Buscando el cruce…';
+        scheduleAutomaticLocate(100);
+      });
+      cornerSuggestions.append(option);
+    });
+  }
+
+  cornerSuggestions.hidden = false;
+  cornerInput.setAttribute('aria-expanded', 'true');
+}
+
+function uniqueStreetSuggestions(features) {
+  const streets = new Map();
+  for (const feature of features) {
+    const name = normalizeStreetName(feature.properties.name || '');
+    if (name && !streets.has(name)) streets.set(name, feature);
+  }
+  return [...streets.values()];
+}
+
+async function fetchCornerMatches(query, { showLoading = false } = {}) {
+  const cleanQuery = query.trim();
+  if (cleanQuery.length < 2) {
+    hideCornerSuggestions();
+    return [];
+  }
+
+  cornerSearchController?.abort();
+  const controller = new AbortController();
+  cornerSearchController = controller;
+  if (showLoading) {
+    cornerSuggestions.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'suggestion-empty';
+    loading.textContent = 'Buscando calles de Durazno…';
+    cornerSuggestions.append(loading);
+    cornerSuggestions.hidden = false;
+    cornerInput.setAttribute('aria-expanded', 'true');
+  }
+
+  try {
+    const streets = uniqueStreetSuggestions(await fetchStreetWays(cleanQuery, { signal: controller.signal }));
+    if (controller !== cornerSearchController) return [];
+    renderCornerSuggestions(streets, 'No encontramos esa calle en Durazno. Revisá el nombre.');
+    cornerStatus.textContent = streets.length
+      ? 'Elegí una calle válida de Durazno.'
+      : 'La esquina debe ser una calle registrada en Durazno.';
+    return streets;
+  } catch (error) {
+    if (error.name === 'AbortError') return [];
+    if (controller === cornerSearchController) {
+      renderCornerSuggestions([], 'No se pudo consultar el callejero de Durazno.');
+      cornerStatus.textContent = 'No se pudo consultar el callejero. Intentá nuevamente.';
+    }
+    return [];
+  }
+}
+
 function selectAddressSuggestion(index) {
   const suggestion = addressMatches[index];
   if (!suggestion) return null;
 
-  const place = suggestion.type === 'intersection' ? suggestion : formatPhotonPlace(suggestion);
-  addressInput.value = place.address;
+  const place = suggestion.type === 'intersection'
+    ? { ...suggestion }
+    : formatPhotonPlace(suggestion);
+  const addressNumber = parseHouseNumberQuery(addressInput.value);
+  const sourceAddress = addressInput.value.trim();
+  const sourceCorner = cornerInput.value.trim();
+  if (suggestion.type !== 'intersection' && !addressNumber && suggestion.properties?.type === 'street') {
+    addressInput.value = suggestion.properties.name || place.address;
+    resolvedLocation = null;
+    setCornerRequired(true, 'Completá la segunda calle para ubicar el cruce.');
+    locationStatus.textContent = 'Calle seleccionada. Completá la otra calle para ubicar el pin.';
+    hideAddressSuggestions();
+    if (cornerInput.value.trim()) scheduleAutomaticLocate();
+    return null;
+  }
+
+  if (suggestion.type === 'intersection') {
+    place.address = `${sourceAddress} esquina ${sourceCorner}`;
+    place.sourceCorner = sourceCorner;
+    cornerStatus.textContent = 'Cruce confirmado en Durazno.';
+  } else {
+    place.address = addressNumber?.query || sourceAddress;
+    setCornerRequired(false, 'Opcional si se encuentra la dirección con número.');
+  }
+  place.sourceAddress = sourceAddress;
   resolvedLocation = place;
-  mapFrame.src = makeOpenStreetMapEmbedUrl(place.latitude, place.longitude);
+  updateMap(place.latitude, place.longitude);
   mapLabel.textContent = place.displayName;
   locationStatus.textContent = `Ubicación confirmada en Durazno · ${place.latitude.toFixed(5)}, ${place.longitude.toFixed(5)}`;
   locationStatus.classList.remove('location-error');
   hideAddressSuggestions();
-  addressInput.focus();
-  showToast('Dirección seleccionada y ubicada en el mapa.');
+  hideCornerSuggestions();
+  showToast(suggestion.type === 'intersection'
+    ? 'Intersección seleccionada y ubicada en el mapa.'
+    : 'Dirección con número seleccionada y ubicada en el mapa.');
   return place;
 }
 
-async function fetchAddressMatches(query, { showLoading = false } = {}) {
+function getCurrentResolvedLocation() {
+  if (!resolvedLocation) return null;
+  const sourceAddress = resolvedLocation.sourceAddress || resolvedLocation.address;
+  if (sourceAddress.toLowerCase() !== addressInput.value.trim().toLowerCase()) return null;
+  if (resolvedLocation.type === 'intersection'
+    && resolvedLocation.sourceCorner?.toLowerCase() !== cornerInput.value.trim().toLowerCase()) return null;
+  return resolvedLocation;
+}
+
+async function fetchAddressMatches(query, { showLoading = false, autoLocate = false } = {}) {
   const cleanQuery = query.trim();
   if (cleanQuery.length < 3) {
     hideAddressSuggestions();
@@ -566,43 +766,53 @@ async function fetchAddressMatches(query, { showLoading = false } = {}) {
     addressInput.setAttribute('aria-expanded', 'true');
   }
 
-  try {
-    const intersectionStreets = parseIntersectionQuery(cleanQuery);
-    if (intersectionStreets) {
-      const intersections = await findStreetIntersections(intersectionStreets);
+  const addressNumber = parseHouseNumberQuery(cleanQuery);
+  if (!addressNumber) {
+    setCornerRequired(true, 'Obligatoria para ubicar una dirección sin número.');
+    try {
+      const streets = uniqueStreetSuggestions(await fetchStreetWays(cleanQuery, { signal: controller.signal }));
       if (controller !== addressSearchController) return [];
-      addressMatches = intersections;
-      renderAddressSuggestions(intersections, cleanQuery, 'No encontramos esa intersección conectada en el mapa de Durazno. ');
-      return intersections;
+      renderAddressSuggestions(streets, 'No encontramos esa calle en Durazno. Podés corregirla o indicar otra calle.');
+      locationStatus.textContent = streets.length
+        ? 'Elegí una calle sugerida. Para ubicar el pin, indicá también la calle que cruza.'
+        : 'No encontramos esa calle. Revisá el nombre o completá la segunda calle.';
+      locationStatus.classList.remove('location-error');
+      return streets;
+    } catch (error) {
+      if (error.name === 'AbortError') return [];
+      if (controller === addressSearchController) {
+        renderAddressSuggestions([], 'No se pudo consultar el callejero de Durazno.');
+        locationStatus.textContent = 'No se pudo consultar la dirección. Revisá tu conexión e intentá nuevamente.';
+        locationStatus.classList.add('location-error');
+      }
+      return [];
     }
+  }
 
+  setCornerRequired(false, 'Opcional si se encuentra la dirección con número.');
+  try {
     const params = new URLSearchParams({
       q: `${cleanQuery}, Durazno, Uruguay`,
       lat: '-33.3782',
       lon: '-56.5241',
       limit: '12',
     });
-    const response = await fetch(`https://photon.komoot.io/api/?${params}`, { signal: controller.signal });
-    if (!response.ok) throw new Error('No se pudo consultar el buscador de direcciones.');
-    const result = await response.json();
+    const features = await fetchPhotonFeatures(params);
     if (controller !== addressSearchController) return [];
 
-    const normalizedQuery = cleanQuery.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    const features = (result.features || []).filter((feature) => {
+    const matchingFeatures = features.filter((feature) => {
       const place = feature.properties || {};
-      const searchablePlace = [place.name, place.street, place.housenumber]
+      const houseNumber = normalizeAddressSearchText(String(place.housenumber || '')).replace(/\s+/g, '');
+      const streetNames = [place.street, place.name]
         .filter(Boolean)
-        .join(' ')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase();
-      const matchesQuery = searchablePlace.includes(normalizedQuery)
-        || (searchablePlace.length >= 4 && normalizedQuery.includes(searchablePlace));
-      return isDuraznoCity(place) && matchesQuery;
+        .map(normalizeStreetName);
+      return isDuraznoCity(place)
+        && houseNumber === addressNumber.houseNumber
+        && streetNames.includes(normalizeStreetName(addressNumber.street));
     });
     const uniqueFeatures = [];
     const seenPlaces = new Set();
-    for (const feature of features) {
+    for (const feature of matchingFeatures) {
       const place = formatPhotonPlace(feature);
       const key = place.address.toLowerCase();
       if (!seenPlaces.has(key)) {
@@ -610,13 +820,25 @@ async function fetchAddressMatches(query, { showLoading = false } = {}) {
         uniqueFeatures.push(feature);
       }
     }
-    renderAddressSuggestions(uniqueFeatures.slice(0, 7), cleanQuery);
+    if (uniqueFeatures.length) {
+      setCornerRequired(false, 'Opcional si se encuentra la dirección con número.');
+      locationStatus.textContent = 'Se encontró la dirección con número en Durazno.';
+      locationStatus.classList.remove('location-error');
+    } else {
+      setCornerRequired(true, 'No encontramos ese número. Ingresá una esquina para ubicar el cruce.');
+      locationStatus.textContent = 'No se encontró esa dirección con número. Completá Esquina para ubicar el cruce.';
+      locationStatus.classList.add('location-error');
+    }
+    renderAddressSuggestions(uniqueFeatures.slice(0, 7), 'No encontramos esa dirección con número. Completá Esquina para ubicar el cruce.');
+    if (autoLocate && uniqueFeatures.length) selectAddressSuggestion(0);
+    else if (autoLocate && cornerInput.value.trim()) scheduleAutomaticLocate();
     return uniqueFeatures;
   } catch (error) {
     if (error.name === 'AbortError') return [];
     if (controller === addressSearchController) {
-      renderAddressSuggestions([], cleanQuery, 'No se pudo consultar el buscador. ');
-      locationStatus.textContent = 'No se pudo consultar el servicio de direcciones.';
+      setCornerRequired(true, 'No se pudo buscar el número. Ingresá una esquina para ubicar el cruce.');
+      renderAddressSuggestions([], 'No se pudo consultar la dirección. Podés ingresar una esquina para ubicar el cruce.');
+      locationStatus.textContent = 'No se pudo consultar la dirección con número. Revisá la conexión o completá Esquina.';
       locationStatus.classList.add('location-error');
     }
     return [];
@@ -624,6 +846,7 @@ async function fetchAddressMatches(query, { showLoading = false } = {}) {
 }
 
 async function locateAddress() {
+  window.clearTimeout(automaticLocateTimer);
   const streetAddress = addressInput.value.trim();
   if (!streetAddress) {
     addressInput.setCustomValidity('Ingresá una dirección para ubicarla.');
@@ -633,29 +856,70 @@ async function locateAddress() {
     return null;
   }
 
-  if (resolvedLocation?.address.toLowerCase() === streetAddress.toLowerCase()) return resolvedLocation;
+  const cornerStreet = cornerInput.value.trim();
+  const currentLocation = getCurrentResolvedLocation();
+  if (currentLocation) return currentLocation;
 
-  locateButton.disabled = true;
-  locateButton.textContent = 'Buscando…';
-  locationStatus.textContent = 'Buscando coincidencias en Durazno…';
+  window.clearTimeout(addressSearchTimer);
+  window.clearTimeout(cornerSearchTimer);
+  cornerSearchController?.abort();
+  hideCornerSuggestions();
   locationStatus.classList.remove('location-error');
   try {
-    const matches = await fetchAddressMatches(streetAddress, { showLoading: true });
-    const firstValidMatch = matches[0];
-    if (!firstValidMatch) {
+    const addressNumber = parseHouseNumberQuery(streetAddress);
+    if (addressNumber) {
+      locationStatus.textContent = 'Buscando primero la dirección con número…';
+      const numberedMatches = await fetchAddressMatches(streetAddress, { showLoading: true });
+      if (numberedMatches.length) return selectAddressSuggestion(0);
+      if (addressSearchController?.signal.aborted) return null;
+    } else {
+      setCornerRequired(true, 'Obligatoria para ubicar una dirección sin número.');
+    }
+
+    if (!cornerStreet) {
       resolvedLocation = null;
-      locationStatus.textContent = 'No encontramos una coincidencia en Durazno. Elegí una sugerencia o revisá el nombre en OpenStreetMap.';
+      setCornerRequired(true, addressNumber
+        ? 'No encontramos ese número. Ingresá una esquina para ubicar el cruce.'
+        : 'Obligatoria para ubicar una dirección sin número.');
+      locationStatus.textContent = addressNumber
+        ? 'No se encontró la dirección con número. Ingresá la calle de la esquina para ubicar el cruce.'
+        : 'Ingresá la calle que cruza con la dirección para ubicar el cruce.';
       locationStatus.classList.add('location-error');
       return null;
     }
-    return selectAddressSuggestion(matches.indexOf(firstValidMatch));
-  } finally {
-    locateButton.disabled = false;
-    locateButton.innerHTML = '<span aria-hidden="true">⌖</span> Ubicar';
+
+    const mainStreet = addressNumber?.street || streetAddress;
+    if (normalizeStreetName(mainStreet) === normalizeStreetName(cornerStreet)) {
+      resolvedLocation = null;
+      locationStatus.textContent = 'Ingresá dos calles distintas para encontrar una esquina.';
+      locationStatus.classList.add('location-error');
+      cornerStatus.textContent = 'La esquina debe ser distinta de la dirección principal.';
+      return null;
+    }
+
+    locationStatus.textContent = 'Buscando el cruce de las dos calles en Durazno…';
+    const intersections = await findStreetIntersections([mainStreet, cornerStreet]);
+    if (!intersections.length) {
+      resolvedLocation = null;
+      locationStatus.textContent = 'No encontramos el cruce. Verificá que ambas calles estén registradas en Durazno.';
+      locationStatus.classList.add('location-error');
+      cornerStatus.textContent = 'Elegí una calle válida de Durazno e intentá nuevamente.';
+      return null;
+    }
+
+    addressMatches = intersections;
+    return selectAddressSuggestion(0);
+  } catch (error) {
+    resolvedLocation = null;
+    locationStatus.textContent = 'No se pudo consultar la dirección o el cruce. Revisá la conexión e intentá nuevamente.';
+    locationStatus.classList.add('location-error');
+    showToast(error.message || 'No se pudo ubicar la dirección.', true);
+    return null;
   }
 }
 
 function buildWhatsAppMessage(order) {
+  const emoji = (...codePoints) => String.fromCodePoint(...codePoints);
   const coordinates = `${Number(order.latitude).toFixed(6)},${Number(order.longitude).toFixed(6)}`;
   const coordinateMatch = coordinates.match(/^(-?\d{1,2}\.\d{6}),(-?\d{1,3}\.\d{6})$/);
   const mapLink = coordinateMatch
@@ -665,26 +929,27 @@ function buildWhatsAppMessage(order) {
     : 'Ubicación no disponible';
 
   return [
-    '\u{1F6F5} *NUEVO PEDIDO DE REPARTO*',
+    `${emoji(0x1F6F5)} NUEVO PEDIDO DE REPARTO`,
     '',
-    `\u{1F3EA} *Comercio:* ${order.merchant}`,
-    `\u{1F464} *Cliente:* ${order.customer}`,
-    `\u{1F4DE} *Contacto:* ${order.contact}`,
+    `${emoji(0x1F3EA)}Comercio: ${order.merchant}`,
     '',
-    '\u{1F4CD} *DIRECCIÓN DE ENTREGA*',
+    `${emoji(0x1F464)}Cliente: ${order.customer}`,
+    `${emoji(0x1F4DE)} Contacto: ${order.contact}`,
+    '',
+    `${emoji(0x1F4CD)} DIRECCIÓN DE ENTREGA`,
     `${order.address}, Durazno, Uruguay`,
-    `\u{1F5FA}\u{FE0F} *Mapa:* ${mapLink}`,
+    `${emoji(0x1F5FA, 0xFE0F)} Mapa: ${mapLink}`,
     '',
-    `\u{1F4B3} *Método de pago:* ${order.paymentMethod}`,
-    `\u{1F4B0} *Total:* ${currencyFormatter.format(order.amount)}`,
+    `${emoji(0x1F4B3)} Método de pago: ${order.paymentMethod}`,
+    `${emoji(0x1F4B0)} Total: ${currencyFormatter.format(order.amount)}`,
     '',
-    `\u{1F4DD} *Observaciones:* ${order.notes || 'Sin observaciones'}`,
+    `${emoji(0x1F4DD)} Observaciones: ${order.notes || 'Sin observaciones'}`,
   ].join('\n');
 }
 
 function makeWhatsAppUrl(order) {
-  const query = new URLSearchParams({ text: buildWhatsAppMessage(order) });
-  return `https://wa.me/59893991330?${query}`;
+  const message = encodeURIComponent(buildWhatsAppMessage(order));
+  return `https://api.whatsapp.com/send?phone=59893991330&text=${message}`;
 }
 
 function handleSubmit(event) {
@@ -705,12 +970,10 @@ function handleSubmit(event) {
     return;
   }
 
-  const location = resolvedLocation?.address.toLowerCase() === addressInput.value.trim().toLowerCase()
-    ? resolvedLocation
-    : null;
+  const location = getCurrentResolvedLocation();
   if (!location) {
-    showToast('Primero tocá “Ubicar” y confirmá la dirección en Durazno.', true);
-    locateButton.focus();
+    showToast('Esperá a que la dirección se confirme automáticamente en Durazno.', true);
+    addressInput.focus();
     return;
   }
 
@@ -727,7 +990,7 @@ function handleSubmit(event) {
     customer: customerInput.value.trim(),
     contact: contactInput.value.trim(),
     paymentMethod: form.elements.paymentMethod.value,
-    address: addressInput.value.trim(),
+    address: location.type === 'intersection' ? location.address : addressInput.value.trim(),
     latitude: location.latitude,
     longitude: location.longitude,
     amount,
@@ -755,11 +1018,14 @@ function handleSubmit(event) {
   form.reset();
   merchantInput.value = merchant;
   resolvedLocation = null;
+  setCornerRequired(false, 'Opcional si se encuentra la dirección con número.');
+  hideAddressSuggestions();
+  hideCornerSuggestions();
   lastProcessedSharedLink = '';
   sharedLocationInput.value = '';
   sharedLocationStatus.textContent = '';
   sharedLocationStatus.className = '';
-  mapFrame.src = makeOpenStreetMapEmbedUrl(-33.3782, -56.5241, 13);
+  updateMap(-33.3782, -56.5241, 13);
   mapLabel.textContent = 'Durazno, Uruguay';
   locationStatus.textContent = 'La zona de reparto está limitada a Durazno, Uruguay.';
   document.querySelector('#word-count').textContent = '0';
@@ -815,6 +1081,7 @@ function exportPdf() {
 }
 
 function initialize() {
+  updateMap(-33.3782, -56.5241, 13);
   try {
     merchantInput.value = localStorage.getItem(STORAGE_KEYS.merchant) || '';
   } catch {
@@ -831,14 +1098,28 @@ function initialize() {
   addressInput.addEventListener('input', () => {
     addressSearchController?.abort();
     window.clearTimeout(addressSearchTimer);
+    window.clearTimeout(automaticLocateTimer);
     if (resolvedLocation?.address.toLowerCase() !== addressInput.value.trim().toLowerCase()) resolvedLocation = null;
+    const hasHouseNumber = Boolean(parseHouseNumberQuery(addressInput.value));
+    if (!hasHouseNumber) {
+      setCornerRequired(true, 'Obligatoria para ubicar una dirección sin número.');
+    } else {
+      setCornerRequired(false, 'Buscando primero la dirección con número.');
+    }
     locationStatus.classList.remove('location-error');
     locationStatus.textContent = addressInput.value.trim().length >= 3
-      ? 'Buscando coincidencias en Durazno…'
+      ? hasHouseNumber
+        ? 'Buscando la dirección con número en Durazno…'
+        : 'Completá Esquina para ubicar el cruce en Durazno.'
       : 'Escribí para ver coincidencias de Durazno, Uruguay.';
     addressSearchTimer = window.setTimeout(() => {
-      fetchAddressMatches(addressInput.value);
+      fetchAddressMatches(addressInput.value, { showLoading: true, autoLocate: true });
     }, 350);
+  });
+  addressInput.addEventListener('blur', () => {
+    if (!parseHouseNumberQuery(addressInput.value) && cornerInput.value.trim()) {
+      scheduleAutomaticLocate();
+    }
   });
   addressInput.addEventListener('keydown', (event) => {
     if (addressSuggestions.hidden) return;
@@ -874,6 +1155,63 @@ function initialize() {
       fetchAddressMatches(addressInput.value, { showLoading: true });
     }
   });
+  cornerInput.addEventListener('input', () => {
+    cornerSearchController?.abort();
+    window.clearTimeout(cornerSearchTimer);
+    window.clearTimeout(automaticLocateTimer);
+    if (resolvedLocation?.type === 'intersection'
+      && resolvedLocation.sourceCorner?.toLowerCase() !== cornerInput.value.trim().toLowerCase()) {
+      resolvedLocation = null;
+    }
+    if (cornerInput.value.trim().length < 2) {
+      hideCornerSuggestions();
+      cornerStatus.textContent = cornerInput.required
+        ? 'Ingresá una calle válida de Durazno.'
+        : 'Opcional si se encuentra la dirección con número.';
+      return;
+    }
+    cornerStatus.textContent = 'Buscando calles de Durazno…';
+    cornerSearchTimer = window.setTimeout(() => {
+      fetchCornerMatches(cornerInput.value, { showLoading: true });
+    }, 350);
+  });
+  cornerInput.addEventListener('blur', () => {
+    if (addressInput.value.trim()) scheduleAutomaticLocate();
+  });
+  cornerInput.addEventListener('focus', () => {
+    if (cornerInput.value.trim().length >= 2 && cornerSuggestions.hidden) {
+      fetchCornerMatches(cornerInput.value, { showLoading: true });
+    }
+  });
+  cornerInput.addEventListener('keydown', (event) => {
+    if (cornerSuggestions.hidden) return;
+    const options = [...cornerSuggestions.querySelectorAll('.suggestion-option')];
+    if (event.key === 'ArrowDown' && options.length) {
+      event.preventDefault();
+      highlightedCornerSuggestion = (highlightedCornerSuggestion + 1) % options.length;
+    } else if (event.key === 'ArrowUp' && options.length) {
+      event.preventDefault();
+      highlightedCornerSuggestion = (highlightedCornerSuggestion - 1 + options.length) % options.length;
+    } else if (event.key === 'Enter' && options.length) {
+      event.preventDefault();
+      options[highlightedCornerSuggestion < 0 ? 0 : highlightedCornerSuggestion].click();
+      return;
+    } else if (event.key === 'Escape') {
+      hideCornerSuggestions();
+      return;
+    } else {
+      return;
+    }
+
+    options.forEach((option, index) => {
+      const isActive = index === highlightedCornerSuggestion;
+      option.setAttribute('aria-selected', String(isActive));
+      if (isActive) {
+        cornerInput.setAttribute('aria-activedescendant', option.id);
+        option.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  });
   sharedLocationInput.addEventListener('input', () => {
     window.clearTimeout(sharedLocationTimer);
     sharedLocationController?.abort();
@@ -891,8 +1229,8 @@ function initialize() {
   });
   document.addEventListener('pointerdown', (event) => {
     if (!addressSearch.contains(event.target)) hideAddressSuggestions();
+    if (!cornerSuggestions.parentElement.contains(event.target)) hideCornerSuggestions();
   });
-  locateButton.addEventListener('click', locateAddress);
   form.addEventListener('submit', handleSubmit);
   document.querySelector('#export-button').addEventListener('click', exportPdf);
   updateDashboard();

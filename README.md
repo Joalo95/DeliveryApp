@@ -4,17 +4,17 @@ Aplicación web estática para registrar pedidos de reparto y compartirlos por W
 
 ## Uso
 
-Iniciá el servidor local con `node server.js` y abrí `http://127.0.0.1:4173` en el navegador. No requiere instalar dependencias. Se necesita conexión a internet para geocodificación, OpenStreetMap, resolución de enlaces, fuentes y exportación PDF.
+Iniciá el servidor local con `node server.js` y abrí `http://127.0.0.1:4173` en el navegador. Si el servidor ya estaba ejecutándose antes de actualizar la aplicación, reinicialo para habilitar el proxy de búsqueda de direcciones. No requiere instalar dependencias. Se necesita conexión a internet para geocodificación, OpenStreetMap, resolución de enlaces, fuentes y exportación PDF.
 
 1. Ingresá el comercio (se recuerda en este navegador), cliente, contacto, dirección, monto y observaciones.
-2. Escribí una calle para ver coincidencias y elegí una dirección sugerida en **Durazno, Uruguay**. Para una esquina, ingresá, por ejemplo, `18 de Julio esquina Varela`; el sistema encuentra el nodo compartido por ambas calles en OpenStreetMap y coloca el pin en ese cruce. También podés pegar un enlace completo de Google Maps o Apple Maps en **Ubicación compartida**; si incluye coordenadas, la dirección se completa automáticamente tras verificar que pertenece a Durazno. El link no se agrega al pedido ni al mensaje. También podés usar **Ubicar** para seleccionar la primera coincidencia válida.
-3. Cargá el pedido. La aplicación conserva el registro localmente y abre el chat del número configurado con el mensaje preparado, organizado por secciones y con un enlace de Google Maps clickeable cuando las coordenadas pasan la validación. Confirmá el envío desde WhatsApp.
+2. Escribí la calle y, si la conocés, el número de puerta en **Dirección de entrega**. Las sugerencias aparecen también para calles sin número. Al encontrar una coincidencia exacta numerada, el pin se ubica automáticamente. Si no hay número o no aparece, completá la segunda calle en el campo **casi**; al terminar o elegir una sugerencia se busca automáticamente el cruce. También podés pegar un enlace completo de Google Maps o Apple Maps en **Ubicación compartida**; si incluye coordenadas, la dirección se completa automáticamente tras verificar que pertenece a Durazno. El enlace no se agrega al pedido ni al mensaje.
+3. Cargá el pedido. La aplicación conserva el registro localmente y abre el chat del número configurado con el mensaje preparado, organizado por secciones. Confirmá el envío desde WhatsApp.
 4. Exportá el listado desde **Exportar PDF**.
 
 ## Servicios y alcance
 
-- El mapa integrado, sus nombres de calles y la búsqueda usan OpenStreetMap/Photon. La aplicación centra el mapa y coloca un marcador en las coordenadas de la coincidencia elegida.
-- Las sugerencias se consultan con Photon/OpenStreetMap, con Durazno como área preferida. Se mantienen los filtros de ciudad de Durazno y país Uruguay antes de confirmar una dirección. Si no hay coincidencias, se ofrece abrir la búsqueda directamente en OpenStreetMap.
+- El mapa usa mosaicos de OpenStreetMap.de; el servidor local consulta Photon para las sugerencias y reutiliza sus respuestas durante un minuto. Las calles y cruces se verifican con OpenStreetMap, sin consultas adicionales de geocodificación inversa.
+- La búsqueda de direcciones numeradas consulta Photon con la dirección completa y solo acepta coincidencias del mismo número y calle en Durazno. No estima ni extrapola números faltantes. Si falta el número o no hay coincidencia, **Esquina** pasa a ser obligatoria: se elige una calle de Durazno y se ubica el nodo compartido por ambas calles en OpenStreetMap. Las intersecciones no se infieren a partir de texto libre; ambas calles deben existir y conectar en el mapa.
 - La ubicación compartida acepta enlaces completos y cortos de Google Maps (`maps.app.goo.gl`, `goo.gl/maps`) y Apple Maps (`maps.apple/p/...`). El servidor local sigue las redirecciones solo hacia dominios permitidos de Maps y devuelve las coordenadas; luego se valida la ciudad con Photon. El enlace se usa solo para completar la dirección y no se guarda en el pedido.
 - Los enlaces cortos requieren usar la aplicación a través de `http://127.0.0.1:4173`; al abrir directamente `index.html` como archivo, el navegador no puede llamar a la API local que expande redirecciones.
 - Los pedidos y el comercio se almacenan en `localStorage` del navegador. No se envían a una base de datos ni se sincronizan entre dispositivos.

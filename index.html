@@ -59,11 +59,14 @@
                   <input id="address" name="address" type="text" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="address-suggestions" aria-expanded="false" maxlength="120" placeholder="Escribí una calle o dirección…" required />
                   <div class="address-suggestions" id="address-suggestions" role="listbox" aria-label="Coincidencias de direcciones" hidden></div>
                 </div>
-                <button class="button button-secondary locate-button" id="locate-button" type="button">
-                  <span aria-hidden="true">⌖</span> Ubicar
-                </button>
+                <label class="address-connector" for="corner">casi</label>
+                <div class="address-search">
+                  <input id="corner" name="corner" type="text" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="corner-suggestions" aria-expanded="false" maxlength="100" placeholder="Otra calle…" />
+                  <div class="address-suggestions" id="corner-suggestions" role="listbox" aria-label="Calles de Durazno" hidden></div>
+                </div>
               </div>
-              <small id="location-status" aria-live="polite">Escribí para ver coincidencias de Durazno, Uruguay.</small>
+              <small id="location-status" aria-live="polite">Ingresá una dirección numerada o dos calles que se crucen.</small>
+              <small id="corner-status" aria-live="polite">Si no se encuentra el número, se buscará el cruce de las dos calles.</small>
             </div>
 
             <div class="field shared-location-field">
@@ -112,19 +115,22 @@
             <span class="map-pin-icon" aria-hidden="true">⌖</span>
           </div>
           <div class="map-frame-wrap">
-            <iframe
+            <div
               id="map-frame"
-              title="Mapa de OpenStreetMap de Durazno, Uruguay. Se actualizará con la dirección seleccionada."
-              src="https://www.openstreetmap.org/export/embed.html?bbox=-56.56%2C-33.42%2C-56.49%2C-33.34&amp;layer=mapnik&amp;marker=-33.3782%2C-56.5241"
-              allowfullscreen
-            ></iframe>
+              class="map-tile-map"
+              role="img"
+              aria-label="Mapa de Durazno, Uruguay"
+            >
+              <div id="map-tiles" aria-hidden="true"></div>
+              <span class="map-marker" aria-hidden="true"></span>
+            </div>
             <div class="map-overlay-label"><span class="status-dot"></span><span id="map-label">Durazno, Uruguay</span></div>
           </div>
           <div class="map-caption">
             <span class="caption-icon" aria-hidden="true">◎</span>
-            <p>Escribí una calle para ver coincidencias y seleccioná la dirección. El pin se actualizará en el mapa.</p>
+            <p>El pin se ubica automáticamente al encontrar la dirección o el cruce de las dos calles.</p>
           </div>
-          <p class="map-attribution">Mapa y nombres de calles: © colaboradores de OpenStreetMap</p>
+          <p class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a></p>
         </article>
       </section>
 

@@ -7,6 +7,8 @@ const PORT = Number(process.env.PORT) || 4173;
 const ROOT = __dirname;
 const MAX_BODY_BYTES = 4096;
 const MAX_REDIRECTS = 7;
+const MAX_PHOTON_CACHE_ENTRIES = 100;
+const PHOTON_CACHE_TTL_MS = 60 * 1000;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const ALLOWED_MAP_HOSTS = new Set([
   'maps.app.goo.gl',
@@ -23,6 +25,7 @@ const STATIC_FILES = new Map([
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
 ]);
+const photonCache = new Map();
 
 function sendJson(response, statusCode, data) {
   response.writeHead(statusCode, {
@@ -170,8 +173,73 @@ async function readJsonBody(request) {
   return JSON.parse(body || '{}');
 }
 
+function fetchPhotonResults(query) {
+  const cached = photonCache.get(query);
+  if (cached && (!cached.expiresAt || cached.expiresAt > Date.now())) {
+    return cached.request || Promise.resolve(cached.result);
+  }
+  if (cached) photonCache.delete(query);
+
+  const params = new URLSearchParams({
+    q: query,
+    lat: '-33.3782',
+    lon: '-56.5241',
+    limit: '12',
+  });
+  const entry = { expiresAt: 0, request: null, result: null };
+  const request = fetch(`https://photon.komoot.io/api/?${params}`, {
+    signal: AbortSignal.timeout(8000),
+    headers: { Accept: 'application/json' },
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error(`El buscador de direcciones respondió HTTP ${response.status}.`);
+      return response.json();
+    })
+    .then((result) => {
+      if (!Array.isArray(result.features)) throw new Error('El buscador devolvió una respuesta inválida.');
+      entry.result = result;
+      entry.request = null;
+      entry.expiresAt = Date.now() + PHOTON_CACHE_TTL_MS;
+      return result;
+    })
+    .catch((error) => {
+      if (photonCache.get(query) === entry) photonCache.delete(query);
+      throw error;
+    });
+  entry.request = request;
+  photonCache.set(query, entry);
+  if (photonCache.size > MAX_PHOTON_CACHE_ENTRIES) {
+    photonCache.delete(photonCache.keys().next().value);
+  }
+  return request;
+}
+
 const server = http.createServer(async (request, response) => {
   const requestUrl = new URL(request.url, `http://${HOST}:${PORT}`);
+  if (requestUrl.pathname === '/api/photon') {
+    if (request.method !== 'GET') {
+      response.setHeader('Allow', 'GET');
+      sendJson(response, 405, { error: 'Método no permitido.' });
+      return;
+    }
+    const query = requestUrl.searchParams.get('q')?.trim() || '';
+    if (query.length < 2 || query.length > 200) {
+      sendJson(response, 400, { error: 'Ingresá una búsqueda de dirección válida.' });
+      return;
+    }
+    try {
+      const result = await fetchPhotonResults(query);
+      sendJson(response, 200, result);
+    } catch (error) {
+      sendJson(response, 502, {
+        error: error.name === 'TimeoutError'
+          ? 'El buscador de direcciones demoró demasiado. Intentá nuevamente.'
+          : error.message || 'No se pudo consultar el buscador de direcciones.',
+      });
+    }
+    return;
+  }
+
   if (requestUrl.pathname === '/api/resolve-map-link') {
     if (request.method !== 'POST') {
       response.setHeader('Allow', 'POST');
