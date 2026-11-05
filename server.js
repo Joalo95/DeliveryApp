@@ -218,6 +218,7 @@ const server = http.createServer(async (request, response) => {
     response.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': contents.length,
+      'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
     });

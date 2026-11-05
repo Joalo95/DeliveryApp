@@ -683,7 +683,8 @@ function buildWhatsAppMessage(order) {
 }
 
 function makeWhatsAppUrl(order) {
-  return `https://wa.me/59893991330?text=${encodeURIComponent(buildWhatsAppMessage(order))}`;
+  const query = new URLSearchParams({ text: buildWhatsAppMessage(order) });
+  return `https://wa.me/59893991330?${query}`;
 }
 
 function handleSubmit(event) {
