@@ -665,20 +665,20 @@ function buildWhatsAppMessage(order) {
     : 'Ubicación no disponible';
 
   return [
-    '🛵 *NUEVO PEDIDO DE REPARTO*',
+    '\u{1F6F5} *NUEVO PEDIDO DE REPARTO*',
     '',
-    `🏪 *Comercio:* ${order.merchant}`,
-    `👤 *Cliente:* ${order.customer}`,
-    `📞 *Contacto:* ${order.contact}`,
+    `\u{1F3EA} *Comercio:* ${order.merchant}`,
+    `\u{1F464} *Cliente:* ${order.customer}`,
+    `\u{1F4DE} *Contacto:* ${order.contact}`,
     '',
-    '📍 *DIRECCIÓN DE ENTREGA*',
+    '\u{1F4CD} *DIRECCIÓN DE ENTREGA*',
     `${order.address}, Durazno, Uruguay`,
-    `🗺️ *Mapa:* ${mapLink}`,
+    `\u{1F5FA}\u{FE0F} *Mapa:* ${mapLink}`,
     '',
-    `💳 *Método de pago:* ${order.paymentMethod}`,
-    `💰 *Total:* ${currencyFormatter.format(order.amount)}`,
+    `\u{1F4B3} *Método de pago:* ${order.paymentMethod}`,
+    `\u{1F4B0} *Total:* ${currencyFormatter.format(order.amount)}`,
     '',
-    `📝 *Observaciones:* ${order.notes || 'Sin observaciones'}`,
+    `\u{1F4DD} *Observaciones:* ${order.notes || 'Sin observaciones'}`,
   ].join('\n');
 }
 
