@@ -656,16 +656,29 @@ async function locateAddress() {
 }
 
 function buildWhatsAppMessage(order) {
+  const coordinates = `${Number(order.latitude).toFixed(6)},${Number(order.longitude).toFixed(6)}`;
+  const coordinateMatch = coordinates.match(/^(-?\d{1,2}\.\d{6}),(-?\d{1,3}\.\d{6})$/);
+  const mapLink = coordinateMatch
+    && Math.abs(Number(coordinateMatch[1])) <= 90
+    && Math.abs(Number(coordinateMatch[2])) <= 180
+    ? `https://www.google.com/maps?q=${coordinateMatch[1]},${coordinateMatch[2]}`
+    : 'Ubicación no disponible';
+
   return [
-    '*Nuevo pedido de reparto*',
-    `*Comercio:* ${order.merchant}`,
-    `*Cliente:* ${order.customer}`,
-    `*Contacto:* ${order.contact}`,
-    `*Método de pago:* ${order.paymentMethod}`,
-    `*Dirección:* ${order.address}, Durazno, Uruguay`,
-    `*Ubicacion:* ${order.latitude}, ${order.longitude}`,
-    `*Monto:* ${currencyFormatter.format(order.amount)}`,
-    `*Observaciones:* ${order.notes || 'Sin observaciones'}`,
+    '🛵 *NUEVO PEDIDO DE REPARTO*',
+    '',
+    `🏪 *Comercio:* ${order.merchant}`,
+    `👤 *Cliente:* ${order.customer}`,
+    `📞 *Contacto:* ${order.contact}`,
+    '',
+    '📍 *DIRECCIÓN DE ENTREGA*',
+    `${order.address}, Durazno, Uruguay`,
+    `🗺️ *Mapa:* ${mapLink}`,
+    '',
+    `💳 *Método de pago:* ${order.paymentMethod}`,
+    `💰 *Total:* ${currencyFormatter.format(order.amount)}`,
+    '',
+    `📝 *Observaciones:* ${order.notes || 'Sin observaciones'}`,
   ].join('\n');
 }
 

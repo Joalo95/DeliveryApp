@@ -8,7 +8,7 @@ Iniciá el servidor local con `node server.js` y abrí `http://127.0.0.1:4173` e
 
 1. Ingresá el comercio (se recuerda en este navegador), cliente, contacto, dirección, monto y observaciones.
 2. Escribí una calle para ver coincidencias y elegí una dirección sugerida en **Durazno, Uruguay**. Para una esquina, ingresá, por ejemplo, `18 de Julio esquina Varela`; el sistema encuentra el nodo compartido por ambas calles en OpenStreetMap y coloca el pin en ese cruce. También podés pegar un enlace completo de Google Maps o Apple Maps en **Ubicación compartida**; si incluye coordenadas, la dirección se completa automáticamente tras verificar que pertenece a Durazno. El link no se agrega al pedido ni al mensaje. También podés usar **Ubicar** para seleccionar la primera coincidencia válida.
-3. Cargá el pedido. La aplicación conserva el registro localmente y abre el chat del número configurado con el mensaje preparado. Confirmá el envío desde WhatsApp.
+3. Cargá el pedido. La aplicación conserva el registro localmente y abre el chat del número configurado con el mensaje preparado, organizado por secciones y con un enlace de Google Maps clickeable cuando las coordenadas pasan la validación. Confirmá el envío desde WhatsApp.
 4. Exportá el listado desde **Exportar PDF**.
 
 ## Servicios y alcance
